@@ -1,0 +1,7 @@
+{
+  "name": "今天吃什么 (What to Eat)",
+  "description": "A decision-making app that uses Amap (高德地图) API to find nearby restaurants and randomly selects one for you.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

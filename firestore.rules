@@ -1,0 +1,105 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+    
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+    
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() < 500)) &&
+             (!('favorites' in data) || (data.favorites is list && data.favorites.size() <= 100)) &&
+             (!('blocked' in data) || (data.blocked is list && data.blocked.size() <= 100)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidHistory(data) {
+      return data.userId is string && data.userId.size() > 0 && data.userId.size() < 100 &&
+             data.restaurantId is string && data.restaurantId.size() > 0 && data.restaurantId.size() < 100 &&
+             data.restaurantName is string && data.restaurantName.size() > 0 && data.restaurantName.size() < 200 &&
+             (!('category' in data) || (data.category is string && data.category.size() < 50)) &&
+             data.timestamp is timestamp;
+    }
+
+    function isValidSession(data) {
+      return data.hostId is string && data.hostId.size() > 0 && data.hostId.size() < 100 &&
+             data.status in ['voting', 'finished'] &&
+             data.candidates is list && data.candidates.size() > 0 && data.candidates.size() <= 50 &&
+             (!('selectedRestaurantId' in data) || (data.selectedRestaurantId is string && data.selectedRestaurantId.size() < 100)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidVote(data) {
+      return data.userId is string && data.userId.size() > 0 && data.userId.size() < 100 &&
+             data.restaurantId is string && data.restaurantId.size() > 0 && data.restaurantId.size() < 100 &&
+             data.timestamp is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && hasRequiredFields(['uid', 'createdAt']) && isValidUser(request.resource.data) && uidUnchanged();
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && uidNotModified() && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(userId);
+    }
+    
+    match /history/{historyId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && hasRequiredFields(['userId', 'restaurantId', 'restaurantName', 'timestamp']) && isValidHistory(request.resource.data);
+      allow update: if false; // History should not be updated
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+    
+    match /sessions/{sessionId} {
+      // Anyone authenticated can read a session (to participate)
+      allow read: if isAuthenticated();
+      // Only host can create
+      allow create: if isAuthenticated() && request.resource.data.hostId == request.auth.uid && hasRequiredFields(['hostId', 'status', 'candidates', 'createdAt']) && isValidSession(request.resource.data);
+      // Only host can update (e.g., finish voting)
+      allow update: if isAuthenticated() && resource.data.hostId == request.auth.uid && isValidSession(request.resource.data) && request.resource.data.hostId == resource.data.hostId && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+      
+      match /votes/{userId} {
+        // Anyone in the session can read votes
+        allow read: if isAuthenticated();
+        // A user can only create/update their own vote
+        allow create: if isOwner(userId) && request.resource.data.userId == request.auth.uid && hasRequiredFields(['userId', 'restaurantId', 'timestamp']) && isValidVote(request.resource.data);
+        allow update: if isOwner(userId) && request.resource.data.userId == request.auth.uid && isValidVote(request.resource.data) && request.resource.data.userId == resource.data.userId;
+        allow delete: if false;
+      }
+    }
+  }
+}

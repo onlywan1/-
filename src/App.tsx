@@ -1,12 +1,20 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Utensils, Navigation, RefreshCw, Star, DollarSign, Loader2, Coffee, ArrowLeft, Sunrise, Sun, Moon, CupSoda, Heart, MessageSquare } from 'lucide-react';
+import { MapPin, Utensils, Navigation, RefreshCw, Star, DollarSign, Loader2, Coffee, ArrowLeft, Sunrise, Sun, Moon, CupSoda, Heart, MessageSquare, LogIn, LogOut, History, Users, Settings2, Ban } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { wgs84togcj02 } from './lib/coord-transform';
 import confetti from 'canvas-confetti';
+import { useAuth } from './components/AuthProvider';
+import { HistoryStats } from './components/HistoryStats';
+import { MultiplayerSession } from './components/MultiplayerSession';
+import { collection, addDoc, serverTimestamp, doc, updateDoc, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
+import { db } from './firebase';
 
 interface Restaurant {
   id: string;
@@ -33,7 +41,8 @@ const categoryLabels: Record<Category, string> = {
 };
 
 export default function App() {
-  const [status, setStatus] = useState<'idle' | 'sub_eat' | 'sub_drink' | 'locating' | 'fetching' | 'ready' | 'error' | 'favorites'>('idle');
+  const { user, signIn, logOut } = useAuth();
+  const [status, setStatus] = useState<'idle' | 'sub_eat' | 'sub_drink' | 'locating' | 'fetching' | 'ready' | 'error' | 'favorites' | 'history' | 'multiplayer'>('idle');
   const [category, setCategory] = useState<Category>('lunch');
   const [errorMsg, setErrorMsg] = useState('');
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
@@ -42,95 +51,119 @@ export default function App() {
   const [spinIndex, setSpinIndex] = useState(0);
   const spinIntervalRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
-  const initAudio = () => {
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    if (audioCtxRef.current.state === 'suspended') {
-      audioCtxRef.current.resume();
-    }
-  };
+  // Filters
+  const [radius, setRadius] = useState('3000');
+  const [priceRange, setPriceRange] = useState('all');
+  const [keyword, setKeyword] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
 
-  const playTick = () => {
-    if (!audioCtxRef.current) return;
-    try {
-      const ctx = audioCtxRef.current;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(800, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.05);
-      gain.gain.setValueAtTime(0.05, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.05);
-    } catch (e) {
-      // Ignore audio errors
-    }
-  };
-
-  const playSuccess = () => {
-    if (!audioCtxRef.current) return;
-    try {
-      const ctx = audioCtxRef.current;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(400, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.1);
-      osc.frequency.setValueAtTime(800, ctx.currentTime + 0.1);
-      osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.3);
-      gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.1);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.5);
-    } catch (e) {
-      // Ignore audio errors
-    }
-  };
-
-  const [favorites, setFavorites] = useState<Restaurant[]>(() => {
-    const saved = localStorage.getItem('favorites');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return [];
-      }
-    }
-    return [];
-  });
+  // User data
+  const [favorites, setFavorites] = useState<Restaurant[]>([]);
+  const [blocked, setBlocked] = useState<Restaurant[]>([]);
 
   useEffect(() => {
-    localStorage.setItem('favorites', JSON.stringify(favorites));
-  }, [favorites]);
+    const urlParams = new URLSearchParams(window.location.search);
+    const session = urlParams.get('session');
+    if (session) {
+      setSessionId(session);
+      setStatus('multiplayer');
+    }
+  }, []);
 
-  const toggleFavorite = (restaurant: Restaurant) => {
-    setFavorites(prev => {
-      const exists = prev.some(r => r.id === restaurant.id);
-      if (exists) {
-        return prev.filter(r => r.id !== restaurant.id);
-      } else {
-        return [...prev, restaurant];
+  useEffect(() => {
+    if (user) {
+      const fetchUserData = async () => {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          setFavorites(data.favorites || []);
+          setBlocked(data.blocked || []);
+        }
+      };
+      fetchUserData();
+    } else {
+      // Fallback to local storage if not logged in
+      const savedFavs = localStorage.getItem('favorites');
+      if (savedFavs) {
+        try {
+          setFavorites(JSON.parse(savedFavs));
+        } catch (e) {}
       }
-    });
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      localStorage.setItem('favorites', JSON.stringify(favorites));
+    }
+  }, [favorites, user]);
+
+  const toggleFavorite = async (restaurant: Restaurant) => {
+    const isFav = favorites.some(r => r.id === restaurant.id);
+    const newFavs = isFav ? favorites.filter(r => r.id !== restaurant.id) : [...favorites, restaurant];
+    setFavorites(newFavs);
+
+    if (user) {
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          favorites: isFav ? arrayRemove(restaurant) : arrayUnion(restaurant)
+        });
+      } catch (e) {
+        console.error("Error updating favorites", e);
+      }
+    }
+  };
+
+  const toggleBlocked = async (restaurant: Restaurant) => {
+    const isBlocked = blocked.some(r => r.id === restaurant.id);
+    const newBlocked = isBlocked ? blocked.filter(r => r.id !== restaurant.id) : [...blocked, restaurant];
+    setBlocked(newBlocked);
+
+    if (user) {
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          blocked: isBlocked ? arrayRemove(restaurant) : arrayUnion(restaurant)
+        });
+      } catch (e) {
+        console.error("Error updating blocked list", e);
+      }
+    }
   };
 
   const fetchRestaurants = async (lat: number, lng: number, cat: Category) => {
     setStatus('fetching');
     try {
-      const response = await fetch(`/api/restaurants?lat=${lat}&lng=${lng}&category=${cat}`);
+      let url = `/api/restaurants?lat=${lat}&lng=${lng}&category=${cat}&radius=${radius}`;
+      if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+      
+      const response = await fetch(url);
       const data = await response.json();
       
       if (response.ok && data.pois && data.pois.length > 0) {
-        setRestaurants(data.pois);
-        setStatus('ready');
+        let filtered = data.pois;
+        
+        // Filter out blocked restaurants
+        filtered = filtered.filter((r: Restaurant) => !blocked.some(b => b.id === r.id));
+        
+        // Price filtering
+        if (priceRange !== 'all') {
+          filtered = filtered.filter((r: Restaurant) => {
+            const cost = parseFloat(r.biz_ext?.cost || '0');
+            if (priceRange === 'cheap') return cost > 0 && cost <= 30;
+            if (priceRange === 'mid') return cost > 30 && cost <= 100;
+            if (priceRange === 'expensive') return cost > 100;
+            return true;
+          });
+        }
+        
+        if (filtered.length > 0) {
+          setRestaurants(filtered);
+          setStatus('ready');
+        } else {
+          throw new Error('筛选后没有找到合适的餐厅，请放宽条件');
+        }
       } else {
         throw new Error(data.error || '附近没有找到合适的餐厅');
       }
@@ -173,6 +206,61 @@ export default function App() {
     setIsSpinning(false);
   };
 
+  // Audio Context for sound effects
+  const initAudio = () => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+  };
+
+  const playTick = () => {
+    if (!audioCtxRef.current) return;
+    const osc = audioCtxRef.current.createOscillator();
+    const gainNode = audioCtxRef.current.createGain();
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, audioCtxRef.current.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(400, audioCtxRef.current.currentTime + 0.05);
+    
+    gainNode.gain.setValueAtTime(0.1, audioCtxRef.current.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtxRef.current.currentTime + 0.05);
+    
+    osc.connect(gainNode);
+    gainNode.connect(audioCtxRef.current.destination);
+    
+    osc.start();
+    osc.stop(audioCtxRef.current.currentTime + 0.05);
+  };
+
+  const playSuccess = () => {
+    if (!audioCtxRef.current) return;
+    
+    // Play a simple major chord arpeggio
+    const frequencies = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+    const now = audioCtxRef.current.currentTime;
+    
+    frequencies.forEach((freq, i) => {
+      const osc = audioCtxRef.current.createOscillator();
+      const gainNode = audioCtxRef.current.createGain();
+      
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      
+      gainNode.gain.setValueAtTime(0, now + i * 0.1);
+      gainNode.gain.linearRampToValueAtTime(0.2, now + i * 0.1 + 0.05);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.5);
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioCtxRef.current.destination);
+      
+      osc.start(now + i * 0.1);
+      osc.stop(now + i * 0.1 + 0.5);
+    });
+  };
+
   const startSpinning = () => {
     if (restaurants.length === 0 || isSpinning) return;
     
@@ -200,7 +288,8 @@ export default function App() {
         setIsSpinning(false);
         const finalIndex = Math.floor(Math.random() * restaurants.length);
         setSpinIndex(finalIndex);
-        setSelected(restaurants[finalIndex]);
+        const finalRestaurant = restaurants[finalIndex];
+        setSelected(finalRestaurant);
         playSuccess();
         confetti({
           particleCount: 100,
@@ -209,6 +298,17 @@ export default function App() {
           colors: ['#f97316', '#ef4444', '#eab308', '#3b82f6'],
           zIndex: 100,
         });
+        
+        // Record history
+        if (user) {
+          addDoc(collection(db, 'history'), {
+            userId: user.uid,
+            restaurantId: finalRestaurant.id,
+            restaurantName: finalRestaurant.name,
+            category: category,
+            timestamp: serverTimestamp()
+          }).catch(console.error);
+        }
       }
     };
 
@@ -227,8 +327,92 @@ export default function App() {
     window.open(url, '_blank');
   };
 
+  const startMultiplayer = async () => {
+    if (!user) {
+      alert("请先登录才能发起多人投票！");
+      return;
+    }
+    
+    // We need to fetch restaurants first, let's just set status to a new state to pick category
+    setStatus('multiplayer');
+  };
+
+  const createSession = async (lat: number, lng: number, cat: Category) => {
+    setStatus('fetching');
+    try {
+      let url = `/api/restaurants?lat=${lat}&lng=${lng}&category=${cat}&radius=${radius}`;
+      if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (response.ok && data.pois && data.pois.length > 0) {
+        let filtered = data.pois.filter((r: Restaurant) => !blocked.some(b => b.id === r.id));
+        
+        if (priceRange !== 'all') {
+          filtered = filtered.filter((r: Restaurant) => {
+            const cost = parseFloat(r.biz_ext?.cost || '0');
+            if (priceRange === 'cheap') return cost > 0 && cost <= 30;
+            if (priceRange === 'mid') return cost > 30 && cost <= 100;
+            if (priceRange === 'expensive') return cost > 100;
+            return true;
+          });
+        }
+        
+        if (filtered.length > 0) {
+          // Select top 5-10 candidates randomly
+          const shuffled = filtered.sort(() => 0.5 - Math.random());
+          const candidates = shuffled.slice(0, Math.min(10, filtered.length));
+          
+          const docRef = await addDoc(collection(db, 'sessions'), {
+            hostId: user.uid,
+            status: 'voting',
+            candidates: candidates,
+            createdAt: serverTimestamp()
+          });
+          
+          setSessionId(docRef.id);
+          setStatus('multiplayer');
+        } else {
+          throw new Error('筛选后没有找到合适的餐厅，请放宽条件');
+        }
+      } else {
+        throw new Error(data.error || '附近没有找到合适的餐厅');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || '获取餐厅信息失败');
+      setStatus('error');
+    }
+  };
+
+  const handleMultiplayerLocation = (cat: Category) => {
+    setCategory(cat);
+    setStatus('locating');
+    setErrorMsg('');
+    if (!navigator.geolocation) {
+      setErrorMsg('您的浏览器不支持地理位置功能');
+      setStatus('error');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const [gcjLng, gcjLat] = wgs84togcj02(longitude, latitude);
+        createSession(gcjLat, gcjLng, cat);
+      },
+      (error) => {
+        setErrorMsg('无法获取您的位置，请确保已授权位置权限。');
+        setStatus('error');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
   const getTitle = () => {
     if (status === 'favorites') return '我的收藏';
+    if (status === 'history') return '干饭周报';
+    if (status === 'multiplayer') return '多人投票';
     if (status === 'idle' || status === 'sub_eat' || status === 'sub_drink') return '今天吃/喝点啥？';
     if (['breakfast', 'lunch', 'dinner'].includes(category)) return `今天${categoryLabels[category]}吃什么？`;
     return `今天喝哪家${categoryLabels[category]}？`;
@@ -294,7 +478,19 @@ export default function App() {
     <div className="min-h-screen bg-orange-50 text-slate-900 font-sans selection:bg-orange-200">
       <div className="max-w-md mx-auto p-6 flex flex-col min-h-screen">
         
-        <header className="text-center py-8">
+        <div className="absolute top-4 right-4 z-50">
+          {user ? (
+            <Button variant="ghost" size="sm" onClick={logOut} className="text-slate-600 hover:text-slate-900">
+              <LogOut className="w-4 h-4 mr-2" /> 退出登录
+            </Button>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={signIn} className="text-orange-600 hover:text-orange-700 hover:bg-orange-100">
+              <LogIn className="w-4 h-4 mr-2" /> 登录同步
+            </Button>
+          )}
+        </div>
+
+        <header className="text-center py-8 mt-4">
           <motion.div 
             initial={{ y: -20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -349,17 +545,158 @@ export default function App() {
                     <Coffee className="h-8 w-8" />
                     <span className="text-lg">喝点啥</span>
                   </Button>
-                  <Button 
-                    size="lg" 
-                    onClick={() => setStatus('favorites')}
-                    className="col-span-2 flex flex-row gap-2 bg-rose-500 hover:bg-rose-600 text-white w-full rounded-2xl h-16 shadow-lg shadow-rose-500/20"
-                  >
-                    <Heart className="h-6 w-6" />
-                    <span className="text-lg">我的收藏</span>
-                  </Button>
+                  
+                  <div className="col-span-2 grid grid-cols-3 gap-2 mt-2">
+                    <Button 
+                      variant="outline"
+                      onClick={() => setStatus('favorites')}
+                      className="flex flex-col gap-1 h-20 rounded-xl border-orange-200 text-orange-700 hover:bg-orange-100"
+                    >
+                      <Heart className="h-5 w-5" />
+                      <span className="text-xs">收藏夹</span>
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => {
+                        if (!user) { alert("请先登录查看周报"); signIn(); return; }
+                        setStatus('history');
+                      }}
+                      className="flex flex-col gap-1 h-20 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-100"
+                    >
+                      <History className="h-5 w-5" />
+                      <span className="text-xs">干饭周报</span>
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={startMultiplayer}
+                      className="flex flex-col gap-1 h-20 rounded-xl border-purple-200 text-purple-700 hover:bg-purple-100"
+                    >
+                      <Users className="h-5 w-5" />
+                      <span className="text-xs">多人投票</span>
+                    </Button>
+                  </div>
+
+                  <div className="col-span-2 mt-2">
+                    <Button 
+                      variant="ghost" 
+                      onClick={() => setShowFilters(!showFilters)}
+                      className="w-full text-slate-500 text-sm"
+                    >
+                      <Settings2 className="w-4 h-4 mr-2" /> {showFilters ? '收起高级筛选' : '展开高级筛选'}
+                    </Button>
+                    
+                    <AnimatePresence>
+                      {showFilters && (
+                        <motion.div 
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="space-y-4 pt-4 pb-2 px-1">
+                            <div className="space-y-2">
+                              <Label className="text-xs text-slate-500">搜索范围</Label>
+                              <Select value={radius} onValueChange={setRadius}>
+                                <SelectTrigger className="w-full bg-white">
+                                  <SelectValue placeholder="选择距离" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="500">500米内 (步行)</SelectItem>
+                                  <SelectItem value="1000">1公里内 (骑行)</SelectItem>
+                                  <SelectItem value="3000">3公里内 (打车)</SelectItem>
+                                  <SelectItem value="5000">5公里内 (开车)</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            
+                            <div className="space-y-2">
+                              <Label className="text-xs text-slate-500">价格区间</Label>
+                              <Select value={priceRange} onValueChange={setPriceRange}>
+                                <SelectTrigger className="w-full bg-white">
+                                  <SelectValue placeholder="选择价格" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">不限</SelectItem>
+                                  <SelectItem value="cheap">平价 (≤30元)</SelectItem>
+                                  <SelectItem value="mid">中等 (30-100元)</SelectItem>
+                                  <SelectItem value="expensive">轻奢 (&gt;100元)</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label className="text-xs text-slate-500">口味偏好 (可选)</Label>
+                              <Input 
+                                placeholder="例如：辣、清淡、烧烤..." 
+                                value={keyword}
+                                onChange={(e) => setKeyword(e.target.value)}
+                                className="bg-white"
+                              />
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </CardContent>
               </Card>
             </motion.div>
+          )}
+
+          {status === 'history' && (
+            <HistoryStats onClose={() => setStatus('idle')} />
+          )}
+
+          {status === 'multiplayer' && (
+            sessionId ? (
+              <MultiplayerSession 
+                sessionId={sessionId} 
+                onClose={() => {
+                  setSessionId(null);
+                  setStatus('idle');
+                  // Remove session from URL
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete('session');
+                  window.history.replaceState({}, '', url.toString());
+                }}
+                onFinished={(restaurant) => {
+                  setSelected(restaurant);
+                  setStatus('ready');
+                  setSessionId(null);
+                  // Remove session from URL
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete('session');
+                  window.history.replaceState({}, '', url.toString());
+                }}
+              />
+            ) : (
+              <motion.div 
+                initial={{ x: 20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                className="w-full"
+              >
+                <Card className="border-purple-200 shadow-purple-100/50 shadow-xl">
+                  <CardHeader className="text-center pb-2 relative">
+                    <Button variant="ghost" size="icon" className="absolute left-2 top-2 text-purple-600" onClick={() => setStatus('idle')}>
+                      <ArrowLeft className="h-5 w-5" />
+                    </Button>
+                    <CardTitle>发起多人投票</CardTitle>
+                    <CardDescription>选择要投票的类别</CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-3 pt-4">
+                    <Button size="lg" onClick={() => handleMultiplayerLocation('lunch')} className="bg-orange-500 hover:bg-orange-600 text-white h-16 text-lg rounded-xl">
+                      <Sun className="mr-3 h-6 w-6" /> 中餐
+                    </Button>
+                    <Button size="lg" onClick={() => handleMultiplayerLocation('dinner')} className="bg-rose-500 hover:bg-rose-600 text-white h-16 text-lg rounded-xl">
+                      <Moon className="mr-3 h-6 w-6" /> 晚餐
+                    </Button>
+                    <Button size="lg" onClick={() => handleMultiplayerLocation('milktea')} className="bg-sky-500 hover:bg-sky-600 text-white h-16 text-lg rounded-xl">
+                      <CupSoda className="mr-3 h-6 w-6" /> 奶茶
+                    </Button>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )
           )}
 
           {status === 'favorites' && (
@@ -544,6 +881,19 @@ export default function App() {
                               onClick={() => toggleFavorite(selected)}
                             >
                               <Heart className={`h-6 w-6 ${favorites.some(r => r.id === selected.id) ? 'fill-rose-500' : ''}`} />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 -mt-1 shrink-0 ml-1"
+                              onClick={() => {
+                                toggleBlocked(selected);
+                                alert("已加入黑名单，下次不会再抽到这家店了！");
+                                startSpinning(); // Spin again automatically
+                              }}
+                              title="拉黑这家店"
+                            >
+                              <Ban className="h-5 w-5" />
                             </Button>
                           </div>
                         </div>

@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "favorites": { "type": "array", "items": { "type": "object" } },
+        "blocked": { "type": "array", "items": { "type": "object" } },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["uid", "createdAt"]
+    },
+    "History": {
+      "title": "History",
+      "description": "Record of a user's spin",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "restaurantId": { "type": "string" },
+        "restaurantName": { "type": "string" },
+        "category": { "type": "string" },
+        "timestamp": { "type": "timestamp" }
+      },
+      "required": ["userId", "restaurantId", "restaurantName", "timestamp"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "Multiplayer voting session",
+      "type": "object",
+      "properties": {
+        "hostId": { "type": "string" },
+        "status": { "type": "string", "enum": ["voting", "finished"] },
+        "candidates": { "type": "array", "items": { "type": "object" } },
+        "selectedRestaurantId": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["hostId", "status", "candidates", "createdAt"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "A user's vote in a session",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "restaurantId": { "type": "string" },
+        "timestamp": { "type": "timestamp" }
+      },
+      "required": ["userId", "restaurantId", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/history/{historyId}": {
+      "schema": { "$ref": "#/entities/History" },
+      "description": "User spin history"
+    },
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/Session" },
+      "description": "Multiplayer voting sessions"
+    },
+    "/sessions/{sessionId}/votes/{userId}": {
+      "schema": { "$ref": "#/entities/Vote" },
+      "description": "Votes for a specific session"
+    }
+  }
+}

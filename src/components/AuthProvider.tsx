@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { User, onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { LoginModal } from './LoginModal';
 
 interface AuthContextType {
   user: User | null;
@@ -22,6 +23,7 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -34,7 +36,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!userSnap.exists()) {
           await setDoc(userRef, {
             uid: currentUser.uid,
-            displayName: currentUser.displayName,
+            displayName: currentUser.displayName || currentUser.phoneNumber || '匿名用户',
             photoURL: currentUser.photoURL,
             favorites: [],
             blocked: [],
@@ -50,12 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signIn = async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error('Error signing in', error);
-    }
+    setIsLoginModalOpen(true);
   };
 
   const logOut = async () => {
@@ -69,6 +66,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <AuthContext.Provider value={{ user, loading, signIn, logOut }}>
       {children}
+      {isLoginModalOpen && (
+        <LoginModal 
+          isOpen={isLoginModalOpen} 
+          onClose={() => setIsLoginModalOpen(false)} 
+        />
+      )}
     </AuthContext.Provider>
   );
 };

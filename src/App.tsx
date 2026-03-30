@@ -355,9 +355,27 @@ export default function App() {
       } else {
         // Stop
         setIsSpinning(false);
-        const finalIndex = Math.floor(Math.random() * restaurants.length);
-        setSpinIndex(finalIndex);
-        const finalRestaurant = restaurants[finalIndex];
+        
+        let finalRestaurant: Restaurant;
+        
+        // 1% chance to draw "Diet" easter egg
+        if (Math.random() < 0.01) {
+          finalRestaurant = {
+            id: 'diet-easter-egg',
+            name: '今天减肥，不吃了！',
+            type: '自律/减肥',
+            location: '你的肚子里',
+            distance: '0',
+            address: '你的脑海中',
+            biz_ext: { rating: '5.0', cost: '0' },
+            photos: []
+          };
+        } else {
+          const finalIndex = Math.floor(Math.random() * restaurants.length);
+          setSpinIndex(finalIndex);
+          finalRestaurant = restaurants[finalIndex];
+        }
+        
         setSelected(finalRestaurant);
         playSuccess();
         confetti({
@@ -369,6 +387,19 @@ export default function App() {
         });
         
         // Record history
+        const historyItem = {
+          restaurantId: finalRestaurant.id,
+          restaurantName: finalRestaurant.name,
+          category: category,
+          timestamp: Date.now()
+        };
+
+        // Save to local storage
+        const localHistory = JSON.parse(localStorage.getItem('food_history') || '[]');
+        localHistory.unshift(historyItem);
+        if (localHistory.length > 50) localHistory.pop();
+        localStorage.setItem('food_history', JSON.stringify(localHistory));
+
         if (user) {
           addDoc(collection(db, 'history'), {
             userId: user.uid,
@@ -612,10 +643,7 @@ export default function App() {
                     </Button>
                     <Button 
                       variant="outline"
-                      onClick={() => {
-                        if (!user) { alert("请先登录查看周报"); signIn(); return; }
-                        setStatus('history');
-                      }}
+                      onClick={() => setStatus('history')}
                       className="flex flex-col gap-1 h-20 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-100"
                     >
                       <History className="h-5 w-5" />
@@ -934,27 +962,31 @@ export default function App() {
                                 ))}
                               </div>
                             </div>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="text-rose-500 hover:text-rose-600 hover:bg-rose-50 -mt-1 -mr-1 shrink-0"
-                              onClick={() => toggleFavorite(selected)}
-                            >
-                              <Heart className={`h-6 w-6 ${favorites.some(r => r.id === selected.id) ? 'fill-rose-500' : ''}`} />
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 -mt-1 shrink-0 ml-1"
-                              onClick={() => {
-                                toggleBlocked(selected);
-                                alert("已加入黑名单，下次不会再抽到这家店了！");
-                                startSpinning(); // Spin again automatically
-                              }}
-                              title="拉黑这家店"
-                            >
-                              <Ban className="h-5 w-5" />
-                            </Button>
+                            {selected.id !== 'diet-easter-egg' && (
+                              <>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="text-rose-500 hover:text-rose-600 hover:bg-rose-50 -mt-1 -mr-1 shrink-0"
+                                  onClick={() => toggleFavorite(selected)}
+                                >
+                                  <Heart className={`h-6 w-6 ${favorites.some(r => r.id === selected.id) ? 'fill-rose-500' : ''}`} />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 -mt-1 shrink-0 ml-1"
+                                  onClick={() => {
+                                    toggleBlocked(selected);
+                                    alert("已加入黑名单，下次不会再抽到这家店了！");
+                                    startSpinning(); // Spin again automatically
+                                  }}
+                                  title="拉黑这家店"
+                                >
+                                  <Ban className="h-5 w-5" />
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </div>
                         
@@ -992,35 +1024,46 @@ export default function App() {
                             </div>
 
                             {/* Mock Reviews Section */}
-                            <div className="mt-6 pt-4 border-t border-orange-100">
-                              <h4 className="text-sm font-bold text-orange-900 mb-3 flex items-center gap-1">
-                                <MessageSquare className="w-4 h-4" />
-                                精选评价
-                              </h4>
-                              <div className="space-y-3">
-                                {currentReviews.map((review, idx) => (
-                                  <div key={idx} className="bg-orange-50/50 rounded-lg p-3 text-left">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <div className="flex items-center gap-2">
-                                        <img src={review.avatar} alt="avatar" className="w-5 h-5 rounded-full bg-orange-200" />
-                                        <span className="text-xs font-medium text-slate-700">{review.author}</span>
-                                      </div>
-                                      <span className="text-xs text-slate-400">{review.date}</span>
-                                    </div>
-                                    <p className="text-sm text-slate-600 leading-relaxed">{review.text}</p>
-                                  </div>
-                                ))}
+                            {selected.id === 'diet-easter-egg' ? (
+                              <div className="mt-6 pt-4 border-t border-orange-100">
+                                <div className="bg-orange-50/50 rounded-lg p-4 text-center">
+                                  <p className="text-sm text-orange-600 font-medium mb-1">🎉 恭喜你抽中了隐藏款！</p>
+                                  <p className="text-xs text-slate-500">今天就当做是给肠胃放个假吧，喝点水早点休息哦~</p>
+                                </div>
                               </div>
+                            ) : (
+                              <div className="mt-6 pt-4 border-t border-orange-100">
+                                <h4 className="text-sm font-bold text-orange-900 mb-3 flex items-center gap-1">
+                                  <MessageSquare className="w-4 h-4" />
+                                  精选评价
+                                </h4>
+                                <div className="space-y-3">
+                                  {currentReviews.map((review, idx) => (
+                                    <div key={idx} className="bg-orange-50/50 rounded-lg p-3 text-left">
+                                      <div className="flex items-center justify-between mb-1">
+                                        <div className="flex items-center gap-2">
+                                          <img src={review.avatar} alt="avatar" className="w-5 h-5 rounded-full bg-orange-200" />
+                                          <span className="text-xs font-medium text-slate-700">{review.author}</span>
+                                        </div>
+                                        <span className="text-xs text-slate-400">{review.date}</span>
+                                      </div>
+                                      <p className="text-sm text-slate-600 leading-relaxed">{review.text}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          {selected.id !== 'diet-easter-egg' && (
+                            <div className="mt-6 flex gap-3">
+                              <Button 
+                                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white rounded-xl h-12 text-base"
+                                onClick={() => openInAmap(selected)}
+                              >
+                                去这里{['breakfast', 'lunch', 'dinner'].includes(category) ? '吃' : '喝'}
+                              </Button>
                             </div>
-                          </div>
-                          <div className="mt-6 flex gap-3">
-                            <Button 
-                              className="flex-1 bg-orange-600 hover:bg-orange-700 text-white rounded-xl h-12 text-base"
-                              onClick={() => openInAmap(selected)}
-                            >
-                              去这里{['breakfast', 'lunch', 'dinner'].includes(category) ? '吃' : '喝'}
-                            </Button>
-                          </div>
+                          )}
                         </div>
                       </div>
                     </motion.div>

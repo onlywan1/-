@@ -55,7 +55,8 @@ export default function App() {
 
   // Filters
   const [radius, setRadius] = useState('3000');
-  const [priceRange, setPriceRange] = useState('all');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
   const [keyword, setKeyword] = useState('');
   const [showFilters, setShowFilters] = useState(false);
 
@@ -132,31 +133,99 @@ export default function App() {
     }
   };
 
+  const fetchAmapData = async (lat: number, lng: number, cat: Category) => {
+    // 使用环境变量，如果没有则使用用户提供的默认 Key
+    const apiKey = import.meta.env.VITE_AMAP_API_KEY || 'c550dbf3e9637016e868f3d92d801daf';
+    
+    let types = '050000';
+    let keywords = '';
+    
+    switch(cat) {
+      case 'breakfast':
+        types = '050000'; keywords = '早餐|早点|包子|粥|粉面'; break;
+      case 'lunch':
+        types = '050100|050200|050300'; keywords = '中餐|快餐|简餐|正餐'; break;
+      case 'dinner':
+        types = '050100|050200'; keywords = '晚餐|火锅|烧烤|正餐|海鲜'; break;
+      case 'coffee':
+        types = '050500'; keywords = '咖啡'; break;
+      case 'milktea':
+        types = '050900'; keywords = '奶茶|果茶|饮品'; break;
+    }
+
+    if (keyword) {
+      keywords = keyword;
+    }
+
+    if (!apiKey) {
+      console.warn('VITE_AMAP_API_KEY is missing. Returning mock data.');
+      let mockPois: Restaurant[] = [];
+      if (cat === 'breakfast') {
+        mockPois = [
+          { id: 'b1', name: '放心早餐车', type: '餐饮服务;快餐厅;快餐厅', location: `${lng},${lat}`, address: '附近街角', distance: '50', biz_ext: { rating: '4.0', cost: '8.00' }, photos: [] },
+          { id: 'b2', name: '永和豆浆', type: '餐饮服务;中餐厅;中餐厅', location: `${lng},${lat}`, address: '附近模拟地址', distance: '150', biz_ext: { rating: '4.2', cost: '15.00' }, photos: [] },
+          { id: 'b3', name: '老街肠粉', type: '餐饮服务;中餐厅;中餐厅', location: `${lng},${lat}`, address: '附近模拟地址', distance: '200', biz_ext: { rating: '4.5', cost: '12.00' }, photos: [] },
+        ];
+      } else if (cat === 'lunch') {
+        mockPois = [
+          { id: 'l1', name: '正宗兰州牛肉面', type: '餐饮服务;快餐厅;快餐厅', location: `${lng},${lat}`, address: '附近模拟地址5号', distance: '80', biz_ext: { rating: '4.0', cost: '25.00' }, photos: [] },
+          { id: 'l2', name: '手工汉堡与精酿', type: '餐饮服务;快餐厅;西式快餐', location: `${lng},${lat}`, address: '附近模拟地址6号', distance: '620', biz_ext: { rating: '4.7', cost: '68.00' }, photos: [] },
+          { id: 'l3', name: '隆江猪脚饭', type: '餐饮服务;快餐厅;中式快餐', location: `${lng},${lat}`, address: '附近模拟地址', distance: '120', biz_ext: { rating: '4.3', cost: '20.00' }, photos: [] },
+        ];
+      } else if (cat === 'dinner') {
+        mockPois = [
+          { id: 'd1', name: '老北京柴火烤鸭', type: '餐饮服务;中餐厅;烤鸭店', location: `${lng},${lat}`, address: '附近模拟地址1号', distance: '120', biz_ext: { rating: '4.8', cost: '120.00' }, photos: [] },
+          { id: 'd2', name: '川蜀麻辣火锅', type: '餐饮服务;中餐厅;火锅店', location: `${lng},${lat}`, address: '附近模拟地址2号', distance: '350', biz_ext: { rating: '4.5', cost: '95.00' }, photos: [] },
+          { id: 'd3', name: '深夜居酒屋', type: '餐饮服务;外国餐厅;日本菜', location: `${lng},${lat}`, address: '附近模拟地址3号', distance: '500', biz_ext: { rating: '4.6', cost: '150.00' }, photos: [] },
+        ];
+      } else if (cat === 'coffee') {
+        mockPois = [
+          { id: 'c1', name: '瑞幸咖啡', type: '餐饮服务;咖啡厅;咖啡厅', location: `${lng},${lat}`, address: '附近模拟地址7号', distance: '100', biz_ext: { rating: '4.3', cost: '15.00' }, photos: [] },
+          { id: 'c2', name: '星巴克', type: '餐饮服务;咖啡厅;咖啡厅', location: `${lng},${lat}`, address: '附近模拟地址9号', distance: '400', biz_ext: { rating: '4.4', cost: '35.00' }, photos: [] },
+          { id: 'c3', name: 'Manner Coffee', type: '餐饮服务;咖啡厅;咖啡厅', location: `${lng},${lat}`, address: '附近模拟地址', distance: '220', biz_ext: { rating: '4.7', cost: '20.00' }, photos: [] },
+        ];
+      } else if (cat === 'milktea') {
+        mockPois = [
+          { id: 'm1', name: '喜茶 HEYTEA', type: '餐饮服务;冷饮店;奶茶店', location: `${lng},${lat}`, address: '附近模拟地址8号', distance: '250', biz_ext: { rating: '4.6', cost: '28.00' }, photos: [] },
+          { id: 'm2', name: '蜜雪冰城', type: '餐饮服务;冷饮店;奶茶店', location: `${lng},${lat}`, address: '附近模拟地址10号', distance: '50', biz_ext: { rating: '4.1', cost: '8.00' }, photos: [] },
+          { id: 'm3', name: '霸王茶姬', type: '餐饮服务;冷饮店;奶茶店', location: `${lng},${lat}`, address: '附近模拟地址', distance: '300', biz_ext: { rating: '4.5', cost: '22.00' }, photos: [] },
+        ];
+      }
+      return mockPois;
+    }
+
+    const amapUrl = `https://restapi.amap.com/v3/place/around?key=${apiKey}&location=${lng},${lat}&types=${types}&keywords=${encodeURIComponent(keywords)}&radius=${radius}&offset=50&page=1&extensions=all`;
+    const response = await fetch(amapUrl);
+    const data = await response.json();
+    
+    if (data.status === '1') {
+      return data.pois || [];
+    } else {
+      throw new Error(data.info || '高德地图 API 错误');
+    }
+  };
+
+  const filterRestaurants = (pois: Restaurant[]) => {
+    let filtered = pois.filter((r: Restaurant) => !blocked.some(b => b.id === r.id));
+    
+    if (minPrice || maxPrice) {
+      filtered = filtered.filter((r: Restaurant) => {
+        const cost = parseFloat(r.biz_ext?.cost || '0');
+        const min = minPrice ? parseFloat(minPrice) : 0;
+        const max = maxPrice ? parseFloat(maxPrice) : Infinity;
+        return cost >= min && cost <= max;
+      });
+    }
+    return filtered;
+  };
+
   const fetchRestaurants = async (lat: number, lng: number, cat: Category) => {
     setStatus('fetching');
     try {
-      let url = `/api/restaurants?lat=${lat}&lng=${lng}&category=${cat}&radius=${radius}`;
-      if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+      const pois = await fetchAmapData(lat, lng, cat);
       
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      if (response.ok && data.pois && data.pois.length > 0) {
-        let filtered = data.pois;
-        
-        // Filter out blocked restaurants
-        filtered = filtered.filter((r: Restaurant) => !blocked.some(b => b.id === r.id));
-        
-        // Price filtering
-        if (priceRange !== 'all') {
-          filtered = filtered.filter((r: Restaurant) => {
-            const cost = parseFloat(r.biz_ext?.cost || '0');
-            if (priceRange === 'cheap') return cost > 0 && cost <= 30;
-            if (priceRange === 'mid') return cost > 30 && cost <= 100;
-            if (priceRange === 'expensive') return cost > 100;
-            return true;
-          });
-        }
+      if (pois && pois.length > 0) {
+        const filtered = filterRestaurants(pois);
         
         if (filtered.length > 0) {
           setRestaurants(filtered);
@@ -165,7 +234,7 @@ export default function App() {
           throw new Error('筛选后没有找到合适的餐厅，请放宽条件');
         }
       } else {
-        throw new Error(data.error || '附近没有找到合适的餐厅');
+        throw new Error('附近没有找到合适的餐厅');
       }
     } catch (err: any) {
       setErrorMsg(err.message || '获取餐厅信息失败');
@@ -340,24 +409,10 @@ export default function App() {
   const createSession = async (lat: number, lng: number, cat: Category) => {
     setStatus('fetching');
     try {
-      let url = `/api/restaurants?lat=${lat}&lng=${lng}&category=${cat}&radius=${radius}`;
-      if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+      const pois = await fetchAmapData(lat, lng, cat);
       
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      if (response.ok && data.pois && data.pois.length > 0) {
-        let filtered = data.pois.filter((r: Restaurant) => !blocked.some(b => b.id === r.id));
-        
-        if (priceRange !== 'all') {
-          filtered = filtered.filter((r: Restaurant) => {
-            const cost = parseFloat(r.biz_ext?.cost || '0');
-            if (priceRange === 'cheap') return cost > 0 && cost <= 30;
-            if (priceRange === 'mid') return cost > 30 && cost <= 100;
-            if (priceRange === 'expensive') return cost > 100;
-            return true;
-          });
-        }
+      if (pois && pois.length > 0) {
+        const filtered = filterRestaurants(pois);
         
         if (filtered.length > 0) {
           // Select top 5-10 candidates randomly
@@ -377,7 +432,7 @@ export default function App() {
           throw new Error('筛选后没有找到合适的餐厅，请放宽条件');
         }
       } else {
-        throw new Error(data.error || '附近没有找到合适的餐厅');
+        throw new Error('附近没有找到合适的餐厅');
       }
     } catch (err: any) {
       setErrorMsg(err.message || '获取餐厅信息失败');
@@ -595,33 +650,38 @@ export default function App() {
                         >
                           <div className="space-y-4 pt-4 pb-2 px-1">
                             <div className="space-y-2">
-                              <Label className="text-xs text-slate-500">搜索范围</Label>
-                              <Select value={radius} onValueChange={setRadius}>
-                                <SelectTrigger className="w-full bg-white">
-                                  <SelectValue placeholder="选择距离" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="500">500米内 (步行)</SelectItem>
-                                  <SelectItem value="1000">1公里内 (骑行)</SelectItem>
-                                  <SelectItem value="3000">3公里内 (打车)</SelectItem>
-                                  <SelectItem value="5000">5公里内 (开车)</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              <Label className="text-xs text-slate-500">搜索范围 (米)</Label>
+                              <div className="flex items-center gap-2">
+                                <Input 
+                                  type="number"
+                                  placeholder="例如：2000" 
+                                  value={radius}
+                                  onChange={(e) => setRadius(e.target.value)}
+                                  className="bg-white"
+                                />
+                                <span className="text-sm text-slate-500 whitespace-nowrap">米内</span>
+                              </div>
                             </div>
                             
                             <div className="space-y-2">
-                              <Label className="text-xs text-slate-500">价格区间</Label>
-                              <Select value={priceRange} onValueChange={setPriceRange}>
-                                <SelectTrigger className="w-full bg-white">
-                                  <SelectValue placeholder="选择价格" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="all">不限</SelectItem>
-                                  <SelectItem value="cheap">平价 (≤30元)</SelectItem>
-                                  <SelectItem value="mid">中等 (30-100元)</SelectItem>
-                                  <SelectItem value="expensive">轻奢 (&gt;100元)</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              <Label className="text-xs text-slate-500">价格区间 (元)</Label>
+                              <div className="flex items-center gap-2">
+                                <Input 
+                                  type="number"
+                                  placeholder="最低价" 
+                                  value={minPrice}
+                                  onChange={(e) => setMinPrice(e.target.value)}
+                                  className="bg-white"
+                                />
+                                <span className="text-slate-400">-</span>
+                                <Input 
+                                  type="number"
+                                  placeholder="最高价" 
+                                  value={maxPrice}
+                                  onChange={(e) => setMaxPrice(e.target.value)}
+                                  className="bg-white"
+                                />
+                              </div>
                             </div>
 
                             <div className="space-y-2">
